@@ -674,3 +674,6 @@ INFO:     204.76.203.18:38082 - "GET /bins/ HTTP/1.1" 404 Not Found
 프록시 요청: GET http://211.188.53.220:2025/bin/
 일반 요청: http://211.188.53.220:2025/bin/
 INFO:     204.76.203.18:34592 - "GET /bin/ HTTP/1.1" 404 Not Found
+프록시 요청: GET http://211.188.53.220:2025/backup/
+일반 요청: http://211.188.53.220:2025/backup/
+INFO:     204.76.203.18:48280 - "GET /backup/ HTTP/1.1" 404 Not Found
