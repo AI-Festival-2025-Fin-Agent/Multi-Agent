@@ -1,4 +1,5 @@
-# Clova MultiAgent 챗봇 시스템
+# 루머 에이전트 비동기 처리 과정
+langgraph cli를 이용해 agent를 만들었을 때, 비동기로 응답을 받는 방법 확인을 위해 chatbot.html을 만듦.
 
 ## 전체 시스템 구성도
 | 구성 요소 |
