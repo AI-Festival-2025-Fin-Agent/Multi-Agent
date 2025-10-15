@@ -677,3 +677,15 @@ INFO:     204.76.203.18:34592 - "GET /bin/ HTTP/1.1" 404 Not Found
 프록시 요청: GET http://211.188.53.220:2025/backup/
 일반 요청: http://211.188.53.220:2025/backup/
 INFO:     204.76.203.18:48280 - "GET /backup/ HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59686 - "OPTIONS /runs HTTP/1.1" 200 OK
+프록시 요청: POST http://211.188.53.220:2025/runs
+일반 요청: http://211.188.53.220:2025/runs
+INFO:     127.0.0.1:59686 - "POST /runs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59700 - "OPTIONS /runs HTTP/1.1" 200 OK
+프록시 요청: POST http://211.188.53.220:2025/runs
+일반 요청: http://211.188.53.220:2025/runs
+INFO:     127.0.0.1:59700 - "POST /runs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49198 - "OPTIONS /runs HTTP/1.1" 200 OK
+프록시 요청: POST http://211.188.53.220:2025/runs
+일반 요청: http://211.188.53.220:2025/runs
+INFO:     127.0.0.1:49198 - "POST /runs HTTP/1.1" 200 OK
