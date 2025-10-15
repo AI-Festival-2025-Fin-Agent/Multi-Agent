@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>챗봇-비동기 -> 모든 질문을 루머에이전트로만 보내서 처리됨</title>
+    <script type="module">
+        import { Client } from "https://esm.sh/@langchain/langgraph-sdk";
+        import { marked } from "https://esm.sh/marked@12.0.0";
+        window.LangGraphClient = Client;
+
+        // marked 설정: 단일 줄바꿈도 <br>로 변환
+        const renderer = new marked.Renderer();
+        renderer.link = function(href, title, text) {
+            return `<a href="${href}" target="_blank" rel="noopener noreferrer"${title ? ` title="${title}"` : ''}>${text}</a>`;
+        };
+
+        marked.setOptions({
+            breaks: true,  // 단일 줄바꿈을 <br>로 변환
+            gfm: true,     // GitHub Flavored Markdown 사용
+            renderer: renderer
+        });
+
+        window.marked = marked;
+
+        // 클래스 정의 대기
+        window.addEventListener('load', () => {
+            if (window.AsyncChatBot) {
+                window.chatBot = new window.AsyncChatBot();
+            }
+        });
+    </script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .chat-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .chat-messages {
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #fafafa;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .user-message {
+            background-color: #007bff;
+            color: white;
+            text-align: right;
+            margin-left: 20%;
+        }
+        .bot-message {
+            background-color: #e9ecef;
+            color: #333;
+            margin-right: 20%;
+        }
+        .input-container {
+            display: flex;
+            gap: 10px;
+        }
+        #userInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        #sendButton {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #sendButton:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 5px;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        .status.connecting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .toggle-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            margin: 5px 0;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            display: block;
+        }
+        .toggle-btn:hover {
+            background: #0056b3;
+        }
+        .toggle-btn.secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .toggle-btn.secondary:hover {
+            background: #545b62;
+        }
+        .toggle-content {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            border-left: 3px solid #007bff;
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <h1>챗봇-비동기 -> 모든 질문을 루머에이전트로만 보내서 처리됨</h1>
+        <div id="status" class="status"></div>
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="input-container">
+            <input type="text" id="userInput" placeholder="질문을 입력하세요..." />
+            <button id="sendButton">전송</button>
+        </div>
+    </div>
+
+    <script>
+        class AsyncChatBot {
+            constructor() {
+                this.proxyUrl = 'http://localhost:8080'; // Python 프록시 서버
+                this.currentRunId = null;
+                this.currentThreadId = null;
+                this.eventSource = null;
+                this.isProcessing = false;
+                this.keyCounter = {}; // 키별 출현 횟수 추적
+                this.langGraphClient = new window.LangGraphClient({
+                    apiUrl: "http://211.188.53.220:2025"
+                });
+
+                this.initializeElements();
+                this.bindEvents();
+            }
+
+            initializeElements() {
+                this.chatMessages = document.getElementById('chatMessages');
+                this.userInput = document.getElementById('userInput');
+                this.sendButton = document.getElementById('sendButton');
+                this.status = document.getElementById('status');
+            }
+
+            bindEvents() {
+                this.sendButton.addEventListener('click', () => this.sendMessage());
+                this.userInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.sendMessage();
+                    }
+                });
+            }
+
+            updateStatus(message, type = 'info') {
+                this.status.textContent = message;
+                this.status.className = `status ${type}`;
+            }
+
+            addMessage(content, isUser = false) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+                messageDiv.textContent = content;
+                this.chatMessages.appendChild(messageDiv);
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+
+            addBotMessage(content, isPartial = false, isMarkdown = false) {
+                let lastBotMessage = this.chatMessages.querySelector('.bot-message:last-child');
+
+                if (isPartial && lastBotMessage && lastBotMessage.dataset.partial === 'true') {
+                    if (isMarkdown) {
+                        lastBotMessage.innerHTML += window.marked.parse(content);
+                    } else {
+                        lastBotMessage.textContent += content;
+                    }
+                } else {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message bot-message';
+
+                    if (isMarkdown) {
+                        messageDiv.innerHTML = window.marked.parse(content);
+                    } else {
+                        messageDiv.textContent = content;
+                    }
+
+                    messageDiv.dataset.partial = isPartial ? 'true' : 'false';
+                    this.chatMessages.appendChild(messageDiv);
+                }
+
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+
+
+            addToggleMessage(title, content, isMarkdown = false, isFirst = true) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message bot-message';
+
+                const toggleBtn = document.createElement('button');
+                toggleBtn.className = isFirst ? 'toggle-btn' : 'toggle-btn secondary';
+                toggleBtn.textContent = `▶ ${title}`;
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'toggle-content';
+
+                if (isMarkdown) {
+                    contentDiv.innerHTML = window.marked.parse(content);
+                } else {
+                    // JSON이나 일반 텍스트를 보기 좋게 표시
+                    contentDiv.style.whiteSpace = 'pre-wrap';
+                    contentDiv.style.fontFamily = 'monospace';
+                    contentDiv.style.fontSize = '14px';
+                    contentDiv.textContent = content;
+                }
+
+                toggleBtn.addEventListener('click', () => {
+                    if (contentDiv.style.display === 'none' || contentDiv.style.display === '') {
+                        contentDiv.style.display = 'block';
+                        toggleBtn.textContent = `▼ ${title}`;
+                    } else {
+                        contentDiv.style.display = 'none';
+                        toggleBtn.textContent = `▶ ${title}`;
+                    }
+                });
+
+                messageDiv.appendChild(toggleBtn);
+                messageDiv.appendChild(contentDiv);
+                this.chatMessages.appendChild(messageDiv);
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+
+            async sendMessage() {
+                const query = this.userInput.value.trim();
+                if (!query || this.isProcessing) return;
+
+                this.isProcessing = true;
+                this.sendButton.disabled = true;
+                this.userInput.disabled = true;
+
+                // 새 메시지 시작 시 키 카운터 리셋
+                this.keyCounter = {};
+
+                this.addMessage(query, true);
+                this.userInput.value = '';
+
+                try {
+                    await this.startRumAgentRun(query);
+                } catch (error) {
+                    console.error('Error:', error);
+                    this.addMessage('오류가 발생했습니다: ' + error.message, false);
+                    this.updateStatus('오류 발생', 'error');
+                } finally {
+                    this.isProcessing = false;
+                    this.sendButton.disabled = false;
+                    this.userInput.disabled = false;
+                    this.userInput.focus();
+                }
+            }
+
+            async startRumAgentRun(query) {
+                this.updateStatus('요청 처리 중...', 'connecting');
+
+                // JavaScript에서 모든 로직 처리
+                const requestData = {
+                    assistant_id: "rum_multi_agent",
+                    input: { query: query },
+                    if_not_exists: "create",
+                    stream_mode: 'values'
+                };
+
+                // 간단한 프록시를 통해 요청
+                const response = await fetch(`${this.proxyUrl}/runs`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const runData = await response.json();
+                console.log('응답 데이터:', runData);
+
+                this.currentRunId = runData.run_id;
+                this.currentThreadId = runData.thread_id;
+
+                if (!this.currentRunId || !this.currentThreadId) {
+                    console.error('run_id 또는 thread_id가 없습니다:', runData);
+                    throw new Error('run_id 또는 thread_id를 받지 못했습니다');
+                }
+
+                console.log(`Run ID: ${this.currentRunId}, Thread ID: ${this.currentThreadId}`);
+
+                // 즉시 스트림 시작
+                await this.startEventStream();
+            }
+
+            async startEventStream() {
+                this.updateStatus('실시간 응답 수신 중...', 'connected');
+
+                try {
+                    console.log('✅ SDK로 스트림 시작');
+                    this.updateStatus('스트림 연결됨', 'connected');
+
+                    // LangGraph SDK로 join_stream
+                    const streamResponse = this.langGraphClient.runs.joinStream(
+                        this.currentThreadId,
+                        this.currentRunId
+                    );
+
+                    for await (const chunk of streamResponse) {
+                        console.log('SDK 청크 수신:', chunk);
+                        this.handleStreamEvent(chunk);
+                    }
+
+                    console.log('✅ 스트림 완료');
+                    this.updateStatus('응답 완료', 'connected');
+
+                } catch (error) {
+                    console.error('❌ 스트림 오류:', error);
+                    this.updateStatus('스트림 연결 오류', 'error');
+                }
+            }
+
+            parseSSEEvent(eventText) {
+                const now = new Date().toLocaleTimeString();
+                console.log(`🕒 [${now}] SSE 이벤트:`, eventText);
+
+                const lines = eventText.split('\n');
+                let eventType = '';
+                let data = '';
+                let id = '';
+
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        eventType = line.slice(7);
+                    } else if (line.startsWith('data: ')) {
+                        data = line.slice(6);
+                    } else if (line.startsWith('id: ')) {
+                        id = line.slice(4);
+                    }
+                }
+
+                if (data === '[DONE]') {
+                    console.log('✅ 스트림 완료');
+                    this.updateStatus('응답 완료', 'connected');
+                    return;
+                }
+
+                if (data) {
+                    console.log(`📊 데이터 길이: ${data.length}자`);
+                    try {
+                        const eventData = JSON.parse(data);
+                        console.log(`🔄 이벤트 처리 중... (타입: ${eventType})`);
+                        this.handleStreamEvent(eventData);
+                    } catch (error) {
+                        console.error('JSON 파싱 오류:', error);
+                        console.log('원본 데이터:', data.substring(0, 200) + '...');
+                    }
+                }
+            }
+
+
+            handleStreamEvent(eventData) {
+                const eventType = eventData.event || '';
+
+                console.log(`이벤트 타입: ${eventType}`);
+
+                // data가 있으면 화면에 표시 (500자 제한) - 기존 로직 유지
+                if (eventData.data) {
+                    let dataString = JSON.stringify(eventData.data, null, 2);
+                    if (dataString.length > 500) {
+                        // 500자가 넘으면 키값들과 처음 500자만 표시
+                        const keys = Object.keys(eventData.data).join(', ');
+                        dataString = `Keys: [${keys}]\n${dataString.substring(0, 500)}...`;
+                    }
+                    this.addBotMessage(`📋 ${eventType} | ${dataString}`);
+
+                    // 추가: 특정 키들을 토글로 markdown 표시 (위 요약본과 같은 이벤트)
+                    const markdownKeys = ['generated_response', 'news_results', 'search_summary', 'selected_documents'];
+                    for (const key of markdownKeys) {
+                        if (eventData.data[key]) {
+                            // 키별 출현 횟수 추적
+                            this.keyCounter[key] = (this.keyCounter[key] || 0) + 1;
+                            const count = this.keyCounter[key];
+                            const countText = count > 1 ? ` (${count}번째)` : '';
+                            const isFirst = count === 1;
+
+                            let content;
+                            let isMarkdown = false;
+
+                            if (typeof eventData.data[key] === 'string') {
+                                content = eventData.data[key];
+                                // 텍스트 키들은 markdown으로 렌더링
+                                if (key === 'search_summary' || key === 'generated_response') {
+                                    isMarkdown = true;
+                                }
+                            } else {
+                                content = JSON.stringify(eventData.data[key], null, 2);
+                            }
+                            this.addToggleMessage(`↪️ ${key}${countText} (Full)`, content, isMarkdown, isFirst);
+                        }
+                    }
+                }
+
+                if (eventData.generated_response) {
+                    let response = eventData.generated_response;
+                    if (response.length > 500) {
+                        response = response.substring(0, 500) + '...';
+                    }
+                    this.addBotMessage(response);
+
+                    // 추가: generated_response 전체를 markdown으로 표시
+                    this.addBotMessage(`### Generated Response (Full)\n${eventData.generated_response}`, false, true);
+                }
+
+                if (eventType.includes('message') || eventType.includes('response')) {
+                    if (eventData.content) {
+                        let content = eventData.content;
+                        if (content.length > 500) {
+                            content = content.substring(0, 500) + '...';
+                        }
+                        this.addBotMessage(content);
+                    }
+                    if (eventData.text) {
+                        let text = eventData.text;
+                        if (text.length > 500) {
+                            text = text.substring(0, 500) + '...';
+                        }
+                        this.addBotMessage(text);
+                    }
+                }
+
+                if (eventType === 'thread.run.completed') {
+                    this.updateStatus('응답 완료', 'connected');
+                }
+            }
+        }
+
+        window.AsyncChatBot = AsyncChatBot;
+    </script>
+</body>
+</html>
